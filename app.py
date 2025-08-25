@@ -68,22 +68,32 @@ def to_raw_github_url(blob_url:str)->str:
     return blob_url
 
 def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seconds=1):
-    b64=base64.b64encode(audio_bytes).decode()
-    html = (
-        "<audio id='"+key+"' autoplay>"
-        + f"<source src='data:{mime};base64,{b64}'>"
-        + "</audio>"
-        + "<script>"
-        + "const a=document.getElementById('"+key+"');"
-        + "const endTime=Date.now()+"+str(1000*max(1,repeat_seconds))+";"
-        + "function kick(){if(Date.now()<endTime){try{a.currentTime=0;a.play().catch(()=>{});}catch(e){}}}"
-        + "a.play().catch(()=>{const resume=()=>{a.play();document.removeEventListener('click',resume);};document.addEventListener('click',resume);});"
-        + "const iv=setInterval(kick,2000);"
-        + "a.addEventListener('ended',kick);"
-        + "setTimeout(()=>{try{clearInterval(iv);a.pause();a.currentTime=0;}catch(e){}}, "+str(1000*max(1,repeat_seconds))+" );"
-        + "</script>"
-    )
-    st.components.v1.html(html,height=0)
+    b64 = base64.b64encode(audio_bytes).decode()
+    html = f"""
+    <audio id='{key}' autoplay>
+      <source src='data:{mime};base64,{b64}'>
+    </audio>
+    <script>
+      const a = document.getElementById('{key}');
+      const endTime = Date.now() + {1000 * max(1, repeat_seconds)};
+      function kick() {{
+        if (Date.now() < endTime) {{
+          try {{ a.currentTime = 0; a.play(); }} catch(e) {{}}
+        }} else {{
+          clearInterval(iv);
+          try {{ a.pause(); a.currentTime = 0; }} catch(e) {{}}
+        }}
+      }}
+      // ensure playback on user interaction if blocked
+      a.play().catch(()=>{{
+        const resume = ()=>{{ a.play(); document.removeEventListener('click',resume); }};
+        document.addEventListener('click',resume);
+      }});
+      // repeat every 2s regardless of file length
+      const iv = setInterval(kick, 2000);
+    </script>
+    """
+    st.components.v1.html(html, height=0)
 
 if 'sounds' not in st.session_state:
     lib={}
