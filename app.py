@@ -69,28 +69,20 @@ def to_raw_github_url(blob_url:str)->str:
 
 def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seconds=1):
     b64=base64.b64encode(audio_bytes).decode()
-    html=f"""
-    <audio id='{key}' autoplay>
-      <source src='data:{mime};base64,{b64}'>
-    </audio>
-    <script>
-      const a=document.getElementById('{key}');
-      const endTime = Date.now() + {1000}*{max(1,repeat_seconds)};
-      const tickMs = 2000; // force a fresh ring every 2s within window
-      function kick(){
-        if(Date.now()<endTime){
-          try{ a.currentTime = 0; a.play().catch(()=>{}); }catch(e){}
-        }
-      }
-      a.play().catch(()=>{
-        const resume=()=>{ a.play(); document.removeEventListener('click',resume); };
-        document.addEventListener('click',resume);
-      });
-      const iv=setInterval(kick, tickMs);
-      a.addEventListener('ended', kick);
-      setTimeout(()=>{ try{ clearInterval(iv); a.pause(); a.currentTime=0; }catch(e){} }, {1000}*{max(1,repeat_seconds)});
-    </script>
-    """
+    html = (
+        "<audio id='"+key+"' autoplay>"
+        + f"<source src='data:{mime};base64,{b64}'>"
+        + "</audio>"
+        + "<script>"
+        + "const a=document.getElementById('"+key+"');"
+        + "const endTime=Date.now()+"+str(1000*max(1,repeat_seconds))+";"
+        + "function kick(){if(Date.now()<endTime){try{a.currentTime=0;a.play().catch(()=>{});}catch(e){}}}"
+        + "a.play().catch(()=>{const resume=()=>{a.play();document.removeEventListener('click',resume);};document.addEventListener('click',resume);});"
+        + "const iv=setInterval(kick,2000);"
+        + "a.addEventListener('ended',kick);"
+        + "setTimeout(()=>{try{clearInterval(iv);a.pause();a.currentTime=0;}catch(e){}}, "+str(1000*max(1,repeat_seconds))+" );"
+        + "</script>"
+    )
     st.components.v1.html(html,height=0)
 
 if 'sounds' not in st.session_state:
@@ -215,14 +207,14 @@ for t in st.session_state.timers:
     sdt=now.replace(hour=hh_s,minute=mm_s,second=ss_s,microsecond=0)
     edt=now.replace(hour=hh_e,minute=mm_e,second=ss_e if ss_e>0 else 59,microsecond=0)
     if sdt<=now<=edt:
-        elapsed=int((now-sdt).total_seconds()//60)
-        if elapsed%t['interval_min']==0:
-            hm=now.strftime('%H:%M')
-            if hm not in t['fired']:
+        elapsed=int((now-sdt).total_seconds())
+        if elapsed % (t['interval_min']*60) < 1:  # check each second
+            hmss=now.strftime('%H:%M:%S')
+            if hmss not in t['fired']:
                 d,m=st.session_state.sounds[t['sound']] if isinstance(st.session_state.sounds[t['sound']],tuple) else (st.session_state.sounds[t['sound']],'audio/wav')
-                st.success(f"Time for: {t['label']} ({hm})")
-                audio_player_autoplay(d,m,key=f"play_{t['id']}_{hm}",repeat_seconds=t['play_seconds'])
-                t['fired'].append(hm)
+                st.success(f"Time for: {t['label']} ({hmss})")
+                audio_player_autoplay(d,m,key=f"play_{t['id']}_{hmss}",repeat_seconds=t['play_seconds'])
+                t['fired'].append(hmss)
 
 # Gentle auto-refresh to keep scheduler active while Running is on
 if st.session_state.running:
