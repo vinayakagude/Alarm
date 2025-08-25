@@ -6,6 +6,8 @@ import io
 import wave
 import numpy as np
 from zoneinfo import ZoneInfo
+import os
+import requests
 
 # ─────────────────────────────────────────────────────────────
 # Config
@@ -36,10 +38,13 @@ def synth_tone(freqs, duration=2.0, decay=2.0):
 
 
 def builtin_sounds_base():
+    # include a synthetic school bell in case remote/ local fetch fails
+    school_bell_synth = synth_tone([(880, 0.9), (1760, 0.5), (2637, 0.25)], duration=0.6, decay=6.0)
     return {
         "Soft Bell": (synth_tone([(660, 0.6), (990, 0.4), (1320, 0.2)], duration=2.2, decay=2.0), 'audio/wav'),
         "Singing Bowl": (synth_tone([(196, 0.8), (392, 0.35), (294, 0.25)], duration=3.0, decay=1.1), 'audio/wav'),
         "Wood Block": (synth_tone([(880, 1.0)], duration=0.35, decay=6.5), 'audio/wav'),
+        "School Bell (synthetic)": (school_bell_synth, 'audio/wav'),
     }
 
 
@@ -61,6 +66,27 @@ def generate_gongs_and_bowls(n=100, seed=7):
         wav = synth_tone(partials, duration=2.0 + float(rng.random() * 1.5), decay=decay)
         sounds[f"{name_base} #{i+1}"] = (wav, 'audio/wav')
     return sounds
+
+# ─────────────────────────────────────────────────────────────
+# Remote sound helper (GitHub raw URLs, etc.)
+# ─────────────────────────────────────────────────────────────
+
+@st.cache_data(show_spinner=False, ttl=60*60*24)
+def fetch_remote_bytes(url: str):
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200 and r.content:
+            return r.content
+    except Exception:
+        return None
+    return None
+
+
+def to_raw_github_url(blob_url: str) -> str:
+    # Convert https://github.com/user/repo/blob/branch/path/file -> https://raw.githubusercontent.com/user/repo/branch/path/file
+    if 'github.com/' in blob_url and '/blob/' in blob_url:
+        return blob_url.replace('github.com/', 'raw.githubusercontent.com/').replace('/blob/', '/')
+    return blob_url
 
 # ─────────────────────────────────────────────────────────────
 # Audio player that reliably loops for N seconds
@@ -93,6 +119,23 @@ if 'sounds' not in st.session_state:
     lib = {}
     lib.update(builtin_sounds_base())
     lib.update(generate_gongs_and_bowls(100))
+
+    # Try local file first (if running with mounted data)
+    local_bell = '/mnt/data/hailuoto-school-bell-recording-106632.mp3'
+    if os.path.exists(local_bell):
+        try:
+            with open(local_bell, 'rb') as f:
+                lib['School Bell'] = (f.read(), 'audio/mpeg')
+        except Exception:
+            pass
+
+    # Try GitHub URL (provided by user)
+    gh_blob_url = 'https://github.com/vinayakagude/Alarm/blob/main/hailuoto-school-bell-recording-106632.mp3'
+    raw_url = to_raw_github_url(gh_blob_url)
+    content = fetch_remote_bytes(raw_url)
+    if content:
+        lib['School Bell'] = (content, 'audio/mpeg')
+
     st.session_state.sounds = lib  # name -> (bytes, mime)
 
 if 'timers' not in st.session_state:
@@ -119,6 +162,20 @@ with st.sidebar:
         snd = st.session_state.sounds[preview_name]
         data, mime = snd if isinstance(snd, tuple) else (snd, 'audio/wav')
         audio_player_autoplay(data, mime, key='preview', repeat_seconds=preview_secs)
+
+    st.divider()
+    st.subheader('Add remote sound via URL')
+    default_url = 'https://github.com/vinayakagude/Alarm/blob/main/hailuoto-school-bell-recording-106632.mp3'
+    user_url = st.text_input('Paste a direct file or GitHub blob URL', default_url)
+    if st.button('Add Remote Sound') and user_url.strip():
+        raw_u = to_raw_github_url(user_url.strip())
+        data = fetch_remote_bytes(raw_u)
+        if data:
+            name = os.path.basename(raw_u)
+            st.session_state.sounds[f'Remote: {name}'] = (data, 'audio/mpeg')
+            st.success(f'Added remote sound: {name}')
+        else:
+            st.warning('Could not fetch that URL. Make sure it is publicly accessible.')
 
 with st.form('add_block'):
     st.subheader('Create a Chime Schedule')
@@ -159,7 +216,7 @@ st.subheader("Today's Schedules")
 remove_ids = []
 for t in st.session_state.timers:
     st.write(f"**{t['label']}** • {t['start']} → {t['end']} • every {t['interval_min']} min • {t['play_seconds']}s • {t['sound']}")
-    if st.button('✖️ Delete', key=f'del_{t['id']}'):
+    if st.button('✖️ Delete', key=f"del_{t['id']}"):
         remove_ids.append(t['id'])
 if remove_ids:
     st.session_state.timers = [x for x in st.session_state.timers if x['id'] not in remove_ids]
