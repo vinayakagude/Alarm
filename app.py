@@ -27,8 +27,8 @@ def synth_tone(freqs, duration=2.0, decay=2.0):
 
 def builtin_sounds_base():
     return {
-        "Soft Bell": (synth_tone([(660, 0.6), (990, 0.4), (1320, 0.2)]), 'audio/wav'),
-        "Singing Bowl": (synth_tone([(196, 0.8), (392, 0.35), (294, 0.25)]), 'audio/wav'),
+        "Soft Bell": (synth_tone([(660, 0.6), (990, 0.4), (1320, 0.2)], duration=2.2, decay=2.0), 'audio/wav'),
+        "Singing Bowl": (synth_tone([(196, 0.8), (392, 0.35), (294, 0.25)], duration=3.0, decay=1.1), 'audio/wav'),
         "Wood Block": (synth_tone([(880, 1.0)], duration=0.35, decay=6.5), 'audio/wav'),
     }
 
@@ -48,21 +48,30 @@ def generate_gongs_and_bowls(n=100, seed=7):
         sounds[f"{name_base} #{i+1}"] = (wav, 'audio/wav')
     return sounds
 
+# ▶️ Robust looping audio: use the <audio loop> attribute and stop it after N seconds
+# This works even when the sound is longer than repeat_seconds.
+
 def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_seconds=1):
     b64 = base64.b64encode(audio_bytes).decode()
     html = f"""
-    <audio id='{key}' autoplay>
+    <audio id='{key}' autoplay loop>
       <source src='data:{mime};base64,{b64}'>
     </audio>
     <script>
       const a = document.getElementById('{key}');
-      const endTime = Date.now() + {repeat_seconds * 1000};
-      function replay() {{ if (Date.now() < endTime) {{ a.currentTime = 0; a.play().catch(()=>{{}}); }} }}
-      a.addEventListener('ended', replay);
+      // Start playback; if blocked, resume on first user interaction
       a.play().catch(() => {{
         const resume = () => {{ a.play(); document.removeEventListener('click', resume); }};
         document.addEventListener('click', resume);
       }});
+      // Stop looping after the requested duration
+      setTimeout(() => {{
+        try {{
+          a.loop = false;
+          a.pause();
+          a.currentTime = 0;
+        }} catch (e) {{}}
+      }}, {max(1, int(1000)) if isinstance(1000, int) else 1000} * {repeat_seconds});
     </script>
     """
     st.components.v1.html(html, height=0)
@@ -93,10 +102,7 @@ with st.sidebar:
     secs = st.slider('Preview seconds', 1, 20, 4)
     if st.button('▶️ Preview'):
         snd = st.session_state.sounds[preview_name]
-        if isinstance(snd, tuple):
-            data, mime = snd
-        else:
-            data, mime = snd, 'audio/wav'
+        data, mime = snd if isinstance(snd, tuple) else (snd, 'audio/wav')
         audio_player_autoplay(data, mime, key='preview', repeat_seconds=secs)
 
 with st.form('add_block'):
