@@ -1,8 +1,9 @@
 import streamlit as st
 import datetime as dt
-import base64, io, wave, time, os, requests, json
+import base64, io, wave, time, os, requests
 import numpy as np
 from zoneinfo import ZoneInfo
+import json
 
 # ─────────────────────────────────────────────────────────────
 # App config
@@ -74,11 +75,14 @@ if "sounds" not in st.session_state:
 if "timers" not in st.session_state:
     st.session_state.timers = []
 
+if "sound_enabled" not in st.session_state:
+    st.session_state.sound_enabled = False
+
 # ─────────────────────────────────────────────────────────────
 # UI
 # ─────────────────────────────────────────────────────────────
 st.title("🧘 Meditation Chimes — Day Planner")
-st.caption("US/Eastern time. Every-minute schedules with chimes that play for N seconds.")
+st.caption("US/Eastern time. Every-minute schedules with repeatable chimes that play for N seconds.")
 
 # Live clock (client-side, always smooth)
 clock_html = """
@@ -97,7 +101,7 @@ function tick(){
     const ss  = pad(et.getSeconds());
     const ap  = et.getHours()>=12?'PM':'AM';
     document.getElementById('et-clock').textContent =
-      '[' + wd + '] ' + mon + ' ' + d + ' — ' + pad(h12) + ':' + mm + ':' + ss + ' ' + ap + ' ET';
+      `${wd}, ${mon} ${d} — ${pad(h12)}:${mm}:${ss} ${ap} ET`;
   }catch(e){}
 }
 tick(); setInterval(tick, 1000);
@@ -105,15 +109,12 @@ tick(); setInterval(tick, 1000);
 """
 st.components.v1.html(clock_html, height=34)
 
-# Autoplay priming (best-effort; still falls back to first click if the browser needs a gesture)
-silent = synth_tone([(440, 0.0)], duration=0.1)
-silent_b64 = base64.b64encode(silent).decode()
-st.components.v1.html(
-    "<audio id='priming' autoplay muted playsinline style='display:none'>"
-    "<source src='data:audio/wav;base64," + silent_b64 + "'>"
-    "</audio>",
-    height=0
-)
+# One-time priming (required for browsers to allow scheduled audio)
+if not st.session_state.sound_enabled:
+    st.info("Click once to enable alarm sound (required by your browser).")
+    if st.button("🔔 Enable Alarm Sound"):
+        st.session_state.sound_enabled = True
+        st.success("Alarm sound enabled for this session.")
 
 with st.sidebar:
     st.header("Preview & Settings")
@@ -123,9 +124,11 @@ with st.sidebar:
         data, mime = st.session_state.sounds[name]
         b64 = base64.b64encode(data).decode()
         st.components.v1.html(
-            "<audio autoplay controls>"
-            "<source src='data:" + mime + ";base64," + b64 + "'>"
-            "</audio>",
+            f"""
+            <audio autoplay controls>
+              <source src="data:{mime};base64,{b64}">
+            </audio>
+            """,
             height=48
         )
 
@@ -137,7 +140,7 @@ with st.sidebar:
         raw = to_raw_github_url(u.strip())
         d = fetch_remote_bytes(raw)
         if d:
-            st.session_state.sounds["Remote: " + os.path.basename(raw)] = (d, "audio/mpeg")
+            st.session_state.sounds[f"Remote: {os.path.basename(raw)}"] = (d, "audio/mpeg")
             st.success("Remote sound added.")
         else:
             st.warning("Could not fetch that URL.")
@@ -149,9 +152,10 @@ with st.form("add_block"):
     start_time = c1.time_input("Start time", dt.time(9,0), step=60)
     end_time   = c2.time_input("End time",   dt.time(17,0), step=60)
     interval_min = c3.number_input("Repeat every (min)", 1, 240, 1)
+
     c4, c5 = st.columns(2)
-    sound_name   = c4.selectbox("Chime sound", list(st.session_state.sounds.keys()))
-    play_seconds = c5.number_input("Each alarm plays (sec)", 1, 300, 8)
+    sound_name  = c4.selectbox("Chime sound", list(st.session_state.sounds.keys()))
+    play_seconds= c5.number_input("Each alarm plays (sec)", 1, 300, 8)
 
     submitted = st.form_submit_button("Add Schedule")
     if submitted:
@@ -161,8 +165,8 @@ with st.form("add_block"):
             st.session_state.timers.append({
                 "id": int(time.time()*1000),
                 "label": label.strip(),
-                "start": start_time.strftime("%H:%M"),  # "HH:MM"
-                "end":   end_time.strftime("%H:%M"),    # "HH:MM"
+                "start": start_time.strftime("%H:%M"),
+                "end":   end_time.strftime("%H:%M"),
                 "interval_min": int(interval_min),
                 "sound": sound_name,
                 "play_seconds": int(play_seconds),
@@ -180,9 +184,9 @@ if remove:
     st.success("Removed schedule(s).")
 
 # ─────────────────────────────────────────────────────────────
-# Client-side scheduler (reliable repeat, no server reruns)
+# Client-side scheduler (fixes repeat + autoplay + rerun issues)
 # ─────────────────────────────────────────────────────────────
-# Build schedules payload with data URLs
+# Build a JSON payload of schedules + data:URLs for sounds
 schedules = []
 for t in st.session_state.timers:
     data, mime = st.session_state.sounds[t["sound"]]
@@ -190,66 +194,104 @@ for t in st.session_state.timers:
     schedules.append({
         "id": t["id"],
         "label": t["label"],
-        "start": t["start"],          # "HH:MM"
-        "end":   t["end"],            # "HH:MM"
+        "start": t["start"],  # "HH:MM"
+        "end": t["end"],      # "HH:MM"
         "interval_min": t["interval_min"],
         "play_seconds": t["play_seconds"],
-        "data_url": "data:" + mime + ";base64," + b64,
+        "data_url": f"data:{mime};base64,{b64}",
     })
-schedules_json = json.dumps(schedules)
 
-html = (
-  "<div id='alarm-log' style='font-size:.9rem;color:#666;margin:6px 0 0 0;'></div>"
-  "<script id='sched-data' type='application/json'>" + schedules_json + "</script>"
-  "<script>(function(){"
-  "  var dataEl = document.getElementById('sched-data');"
-  "  var schedules = JSON.parse(dataEl.textContent);"
-  "  var fired = {}; // { 'YYYY-MM-DD': { id: { 'HH:MM': true } } }"
+enabled = "true" if st.session_state.sound_enabled else "false"
+js = f"""
+<div id="alarm-log" style="font-size:.9rem;color:#666;margin:6px 0 0 0;"></div>
+<script>
+(function() {{
+  const enabled = {enabled};
+  const schedules = {json.dumps(schedules)};
+  const fired = {{}};  // per-day map: {{"YYYY-MM-DD": {{"id": Set of HH:MM}}}}
 
-  "  function etNow(){ var now=new Date();"
-  "    return new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'})); }"
+  function etNow() {{
+    const now = new Date();
+    return new Date(now.toLocaleString('en-US', {{ timeZone: 'America/New_York' }}));
+  }}
 
-  "  function hm(d){ var hh=('0'+d.getHours()).slice(-2);"
-  "    var mm=('0'+d.getMinutes()).slice(-2); return hh+':'+mm; }"
+  function hm(d) {{
+    const hh = d.getHours().toString().padStart(2,'0');
+    const mm = d.getMinutes().toString().padStart(2,'0');
+    return hh + ":" + mm;
+  }}
 
-  "  function minsBetween(startHM, currentHM){"
-  "    var sh=parseInt(startHM.slice(0,2),10), sm=parseInt(startHM.slice(3),10);"
-  "    var ch=parseInt(currentHM.slice(0,2),10), cm=parseInt(currentHM.slice(3),10);"
-  "    return (ch*60+cm)-(sh*60+sm); }"
+  function minsBetween(startHM, currentHM) {{
+    const [sh, sm] = startHM.split(':').map(x => parseInt(x,10));
+    const [ch, cm] = currentHM.split(':').map(x => parseInt(x,10));
+    return (ch*60+cm) - (sh*60+sm);
+  }}
 
-  "  function playForSeconds(url, secs){"
-  "    var a=new Audio(); a.src=url; a.loop=true; a.preload='auto'; a.crossOrigin='anonymous';"
-  "    // Best-effort autoplay; if blocked, first click anywhere will start it"
-  "    function start(){ try{ a.play(); }catch(e){} }"
-  "    start();"
-  "    document.addEventListener('click', function once(){ start(); document.removeEventListener('click', once); }, {once:true});"
-  "    setTimeout(function(){ try{ a.loop=false; a.pause(); a.src=''; }catch(e){} }, Math.max(1,secs)*1000);"
-  "  }"
+  function playForSeconds(dataUrl, seconds, key) {{
+    // Create an <audio> that loops and stop it after N seconds
+    const a = document.createElement('audio');
+    a.src = dataUrl;
+    a.loop = true;
+    a.preload = 'auto';
+    a.style.display = 'none';
+    document.body.appendChild(a);
 
-  "  function tick(){"
-  "    var now=etNow();"
-  "    var ymd = now.getFullYear()+'-'+('0'+(now.getMonth()+1)).slice(-2)+'-'+('0'+now.getDate()).slice(-2);"
-  "    var curHM = hm(now);"
-  "    if(!fired[ymd]) fired[ymd] = {};"
-  "    for(var i=0;i<schedules.length;i++){"
-  "      var s=schedules[i];"
-  "      if(!fired[ymd][s.id]) fired[ymd][s.id] = {};"
-  "      var mFromStart = minsBetween(s.start, curHM);"
-  "      var mFromEnd   = minsBetween(s.start, s.end);"
-  "      if(mFromStart>=0 && mFromStart<=mFromEnd){"
-  "        if(mFromStart % s.interval_min === 0){"
-  "          if(!fired[ymd][s.id][curHM]){"
-  "            playForSeconds(s.data_url, s.play_seconds);"
-  "            fired[ymd][s.id][curHM] = true;"
-  "            var log=document.getElementById('alarm-log');"
-  "            if(log){ var p=document.createElement('div'); p.textContent='['+curHM+'] '+s.label; log.appendChild(p); }"
-  "          }"
-  "        }"
-  "      }"
-  "    }"
-  "  }"
+    const start = () => {{ try {{ a.play(); }} catch(e) {{}} }};
+    if (enabled) start();
+    // Fallback: in case browser still blocks, first user interaction will start
+    const resume = () => {{ start(); document.removeEventListener('click', resume); }};
+    document.addEventListener('click', resume, {{ once:true }});
 
-  "  setInterval(tick, 500); tick();"
-  "})();</script>"
-)
-st.components.v1.html(html, height=0)
+    setTimeout(() => {{
+      try {{ a.loop = false; a.pause(); a.currentTime = 0; }} catch(e) {{}}
+      try {{ a.remove(); }} catch(e) {{}}
+    }}, Math.max(1, seconds) * 1000);
+  }}
+
+  function tick() {{
+    const now = etNow();
+    const ymd = now.getFullYear() + '-' + (now.getMonth()+1).toString().padStart(2,'0') + '-' + now.getDate().toString().padStart(2,'0');
+    const curHM = hm(now);
+
+    if (!fired[ymd]) fired[ymd] = {{}};
+
+    schedules.forEach(s => {{
+      // Daily reset per schedule id
+      if (!fired[ymd][s.id]) fired[ymd][s.id] = new Set();
+
+      // Is within window?
+      const startHM = s.start;
+      const endHM   = s.end;
+      const mFromStart = minsBetween(startHM, curHM);
+      const mFromEnd   = minsBetween(startHM, endHM);
+
+      // Only consider when in [start, end], inclusive
+      if (mFromStart >= 0 && mFromStart <= mFromEnd) {{
+        // On bucket? (every interval_min minutes)
+        if (mFromStart % s.interval_min === 0) {{
+          // Fire only once per minute
+          if (!fired[ymd][s.id].has(curHM)) {{
+            // Play now (looped for s.play_seconds)
+            playForSeconds(s.data_url, s.play_seconds, 'key_'+s.id+'_'+curHM);
+            fired[ymd][s.id].add(curHM);
+
+            // Optional: on-screen log line
+            const log = document.getElementById('alarm-log');
+            if (log) {{
+              const p = document.createElement('div');
+              p.textContent = '[' + curHM + '] ' + s.label;
+              log.appendChild(p);
+            }}
+          }}
+        }}
+      }}
+    }});
+  }}
+
+  // run fast enough to catch minute edges precisely
+  tick();
+  setInterval(tick, 500);
+}})();
+</script>
+"""
+st.components.v1.html(js, height=0)
