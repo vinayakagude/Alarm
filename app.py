@@ -68,50 +68,34 @@ def to_raw_github_url(blob_url:str)->str:
     return blob_url
 
 def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seconds=1):
-    """Autoplay with reliable repeat: loop the audio and stop after N seconds.
-    Includes a one-time 'Enable sound' button to satisfy browser gesture policies.
-    """
+    """Autoplay with reliable repeat: loop the audio and stop after N seconds."""
     b64 = base64.b64encode(audio_bytes).decode()
     dur_ms = 1000 * max(1, repeat_seconds)
-    html = (
-        "<div style='display:flex;align-items:center;gap:.5rem'>"
-        + "<audio id='"+key+"' autoplay loop preload='auto'>"
-        + "<source src='data:"+mime+";base64,"+b64+"'>"
-        + "</audio>"
-        + "<button id='btn_"+key+"' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>"
-        + "</div>"
-        + "<script>"
-        + "(function(){
-"
-          "  const a=document.getElementById('"+key+"');
-"
-          "  const btn=document.getElementById('btn_"+key+"');
-"
-          "  a.muted=false;
-"
-          "  function start(){ try{ a.play().catch(()=>{}); }catch(e){} }
-"
-          "  a.addEventListener('canplay', start, {once:true});
-"
-          "  // Try immediately as well
-"
-          "  start();
-"
-          "  // If autoplay is blocked, a user click will enable it
-"
-          "  ['click','pointerdown','keydown','touchstart'].forEach(ev=>{ document.addEventListener(ev, start, { once:true }); });
-"
-          "  if(btn) btn.addEventListener('click', start, {once:true});
-"
-          "  // Stop after the repeat window
-"
-          "  setTimeout(()=>{ try{ a.loop=false; a.pause(); a.currentTime=0; }catch(e){} }, "+str(dur_ms)+");
-"
-          "})();
-"
-        + "</script>"
-    )
-    st.components.v1.html(html, height=40)
+    html = """
+    <div style='display:flex;align-items:center;gap:.5rem'>
+      <audio id='"""+key+"""' autoplay loop preload='auto'>
+        <source src='data:"""+mime+""";base64,"""+b64+"""'>
+      </audio>
+      <button id='btn_"""+key+"""' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>
+    </div>
+    <script>
+      (function(){
+        const a=document.getElementById('"""+key+"""');
+        const btn=document.getElementById('btn_"""+key+"""');
+        const endTime=Date.now()+"""+str(dur_ms)+""";
+        function start(){ try{ a.play().catch(()=>{}); }catch(e){} }
+        function loopOrStop(){
+          if(Date.now()<endTime){ try{ if(a.paused){a.play().catch(()=>{});} }catch(e){} }
+          else { try{ a.pause(); a.currentTime=0; }catch(e){} clearInterval(iv); }
+        }
+        start();
+        ['click','pointerdown','keydown','touchstart'].forEach(ev=>{ document.addEventListener(ev, start, { once:true }); });
+        if(btn) btn.addEventListener('click', start, {once:true});
+        const iv=setInterval(loopOrStop, 1000);
+      })();
+    </script>
+    """
+    st.components.v1.html(html, height=60)
 
 if 'sounds' not in st.session_state:
     lib={}
