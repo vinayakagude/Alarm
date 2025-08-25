@@ -5,6 +5,7 @@ import base64
 import io
 import wave
 import numpy as np
+from zoneinfo import ZoneInfo
 
 SR = 44100
 
@@ -134,10 +135,10 @@ for t in st.session_state.timers:
 if remove_ids:
     st.session_state.timers=[x for x in st.session_state.timers if x['id'] not in remove_ids]
 
-st.metric('Current Time', dt.datetime.now().strftime('%H:%M:%S'))
+now = dt.datetime.now(ZoneInfo("America/New_York"))
+st.metric('Current Time (US/Eastern)', now.strftime('%A, %b %d — %I:%M:%S %p'))
 if st.session_state.running: auto_refresh(1000)
 
-now=dt.datetime.now()
 today=now.strftime('%Y-%m-%d')
 for t in st.session_state.timers:
     if t['last_day']!=today:
@@ -153,8 +154,4 @@ for t in st.session_state.timers:
             if hm not in t['fired']:
                 snd=st.session_state.sounds[t['sound']]
                 data,mime=snd if isinstance(snd,tuple) else (snd,'audio/wav')
-                st.success(f"Time for: {t['label']} {hm}")
-                audio_player_autoplay(data,mime,key=f"p{t['id']}{hm}",repeat_seconds=t['play_seconds'])
-                t['fired'].append(hm)
-if not st.session_state.timers:
-    st.info('No schedules yet')
+                st.success(f"Tim
