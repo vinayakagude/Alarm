@@ -9,16 +9,9 @@ from zoneinfo import ZoneInfo
 import os
 import requests
 
-# ─────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title='Meditation Chimes', page_icon='🧘', layout='centered')
-TZ = ZoneInfo('America/New_York')  # US/Eastern
-SR = 44100  # audio sample rate
-
-# ─────────────────────────────────────────────────────────────
-# Audio synthesis helpers (procedural bowls/gongs)
-# ─────────────────────────────────────────────────────────────
+TZ = ZoneInfo('America/New_York')
+SR = 44100
 
 def synth_tone(freqs, duration=2.0, decay=2.0):
     t = np.linspace(0, duration, int(SR * duration), endpoint=False)
@@ -36,7 +29,6 @@ def synth_tone(freqs, duration=2.0, decay=2.0):
         wf.writeframes((y * 32767).astype('<i2').tobytes())
     return buf.getvalue()
 
-
 def builtin_sounds_base():
     school_bell_synth = synth_tone([(880, 0.9), (1760, 0.5), (2637, 0.25)], duration=0.6, decay=6.0)
     return {
@@ -46,14 +38,10 @@ def builtin_sounds_base():
         "School Bell (synthetic)": (school_bell_synth, 'audio/wav'),
     }
 
-
 def generate_gongs_and_bowls(n=100, seed=7):
     rng = np.random.default_rng(seed)
     sounds = {}
-    categories = [
-        ("Deep Gong", 90, 2.5), ("Bronze Gong", 140, 2.2), ("Temple Gong", 220, 2.0),
-        ("Singing Bowl", 196, 1.3), ("Wind Chime", 660, 3.5)
-    ]
+    categories = [("Deep Gong", 90, 2.5), ("Bronze Gong", 140, 2.2), ("Temple Gong", 220, 2.0), ("Singing Bowl", 196, 1.3), ("Wind Chime", 660, 3.5)]
     for i in range(n):
         name_base, base_freq, decay = categories[i % len(categories)]
         partials = []
@@ -75,7 +63,6 @@ def fetch_remote_bytes(url: str):
     except Exception:
         return None
     return None
-
 
 def to_raw_github_url(blob_url: str) -> str:
     if 'github.com/' in blob_url and '/blob/' in blob_url:
@@ -123,7 +110,13 @@ if 'running' not in st.session_state:
     st.session_state.running = True
 
 st.title('🧘 Meditation Chimes — Day Planner')
-st.caption('US/Eastern time. Create a start–end window, choose the interval, sound, and how long each chime plays.')
+st.caption('US/Eastern time. Create a start–end window, choose the interval (every minute), sound, and how long each chime plays.')
+
+# Live client‑side clock that always runs (no reruns required)
+clock_html = """
+<div id=\"et-clock\" style=\"font-size:1.2rem;margin:0.25rem 0 1rem 0;font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\"></div>
+<script>
+  fun
 
 with st.sidebar:
     st.header('Preview & Settings')
@@ -209,3 +202,24 @@ for t in st.session_state.timers:
     hh_e, mm_e = map(int, t['end'].split(':'))
     start_dt = now.replace(hour=hh_s, minute=mm_s, second=0, microsecond=0)
     end_dt = now.replace(hour=hh_e, minute=mm_e, second=59, microsecond=0)
+
+    # If inside active window, check minute bucket
+    if start_dt <= now <= end_dt:
+        elapsed_min = int((now - start_dt).total_seconds() // 60)
+        if elapsed_min % t['interval_min'] == 0:
+            hm = now.strftime('%H:%M')
+            if hm not in t['fired']:
+                snd = st.session_state.sounds[t['sound']]
+                data, mime = snd if isinstance(snd, tuple) else (snd, 'audio/wav')
+                st.success(f"Time for: {t['label']} ({hm})")
+                audio_player_autoplay(data, mime, key=f"play_{t['id']}_{hm}", repeat_seconds=t['play_seconds'])
+                t['fired'].append(hm)
+
+# Force a rerun every second when Running is on → keeps clock active and triggers on time
+if st.session_state.running:
+    time.sleep(1)
+    st.rerun()
+
+# Friendly hint
+if not st.session_state.timers:
+    st.info('No schedules yet. Add one above!')
