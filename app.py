@@ -103,7 +103,7 @@ if 'timers' not in st.session_state: st.session_state.timers=[]
 if 'running' not in st.session_state: st.session_state.running=True
 
 st.title('🧘 Meditation Chimes — Day Planner')
-st.caption('US/Eastern time. Continuous 1-minute interval. Clock updates live.')
+st.caption('US/Eastern time. Continuous 1‑minute interval. Clock updates live.')
 
 # Client-side active clock
 clock_html = """
@@ -156,8 +156,8 @@ with st.form('add_block'):
     st.subheader('Create a Chime Schedule')
     label=st.text_input('Label','Meditation')
     c1,c2,c3=st.columns(3)
-    start_time=c1.time_input('Start time',dt.time(9,0),step=1)
-    end_time=c2.time_input('End time',dt.time(17,0),step=1)
+    start_time=c1.time_input('Start time',dt.time(9,0),step=60)
+    end_time=c2.time_input('End time',dt.time(17,0),step=60)
     interval_min=c3.number_input('Repeat every (min)',1,1,1)
     c4,c5=st.columns(2)
     sound_name=c4.selectbox('Chime sound',list(st.session_state.sounds.keys()))
@@ -214,3 +214,15 @@ for t in st.session_state.timers:
                 st.success(f"Time for: {t['label']} ({hm})")
                 audio_player_autoplay(d,m,key=f"play_{t['id']}_{hm}",repeat_seconds=t['play_seconds'])
                 t['fired'].append(hm)
+
+# Gentle auto-refresh to keep scheduler active while Running is on
+if st.session_state.running:
+    st.components.v1.html("""
+    <script>
+      setTimeout(function(){
+        const url = new URL(window.location.href);
+        url.searchParams.set('ts', Date.now());
+        window.location.replace(url.toString());
+      }, 1000);
+    </script>
+    """, height=0)
