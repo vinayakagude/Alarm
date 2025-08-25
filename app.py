@@ -81,20 +81,34 @@ def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seco
         + "<button id='btn_"+key+"' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>"
         + "</div>"
         + "<script>"
-        + "(function(){\n"
-          "  const a=document.getElementById('"+key+"');\n"
-          "  const btn=document.getElementById('btn_"+key+"');\n"
-          "  a.muted=false;\n"
-          "  function start(){ try{ a.play().catch(()=>{}); }catch(e){} }\n"
-          "  a.addEventListener('canplay', start, {once:true});\n"
-          "  // Try immediately as well\n"
-          "  start();\n"
-          "  // If autoplay is blocked, a user click will enable it\n"
-          "  ['click','pointerdown','keydown','touchstart'].forEach(ev=>{ document.addEventListener(ev, start, { once:true }); });\n"
-          "  if(btn) btn.addEventListener('click', start, {once:true});\n"
-          "  // Stop after the repeat window\n"
-          "  setTimeout(()=>{ try{ a.loop=false; a.pause(); a.currentTime=0; }catch(e){} }, "+str(dur_ms)+");\n"
-          "})();\n"
+        + "(function(){
+"
+          "  const a=document.getElementById('"+key+"');
+"
+          "  const btn=document.getElementById('btn_"+key+"');
+"
+          "  a.muted=false;
+"
+          "  function start(){ try{ a.play().catch(()=>{}); }catch(e){} }
+"
+          "  a.addEventListener('canplay', start, {once:true});
+"
+          "  // Try immediately as well
+"
+          "  start();
+"
+          "  // If autoplay is blocked, a user click will enable it
+"
+          "  ['click','pointerdown','keydown','touchstart'].forEach(ev=>{ document.addEventListener(ev, start, { once:true }); });
+"
+          "  if(btn) btn.addEventListener('click', start, {once:true});
+"
+          "  // Stop after the repeat window
+"
+          "  setTimeout(()=>{ try{ a.loop=false; a.pause(); a.currentTime=0; }catch(e){} }, "+str(dur_ms)+");
+"
+          "})();
+"
         + "</script>"
     )
     st.components.v1.html(html, height=40)
@@ -221,23 +235,26 @@ for t in st.session_state.timers:
     sdt=now.replace(hour=hh_s,minute=mm_s,second=ss_s,microsecond=0)
     edt=now.replace(hour=hh_e,minute=mm_e,second=ss_e if ss_e>0 else 59,microsecond=0)
     if sdt<=now<=edt:
-        elapsed=int((now-sdt).total_seconds())
-        if elapsed % (t['interval_min']*60) < 1:  # check each second
-            hmss=now.strftime('%H:%M:%S')
-            if hmss not in t['fired']:
+        elapsed=int((now-sdt).total_seconds()//60)
+        if elapsed%t['interval_min']==0:
+            hm=now.strftime('%H:%M')
+            if hm not in t['fired']:
                 d,m=st.session_state.sounds[t['sound']] if isinstance(st.session_state.sounds[t['sound']],tuple) else (st.session_state.sounds[t['sound']],'audio/wav')
-                st.success(f"Time for: {t['label']} ({hmss})")
-                audio_player_autoplay(d,m,key=f"play_{t['id']}_{hmss}",repeat_seconds=t['play_seconds'])
-                t['fired'].append(hmss)
+                st.success(f"Time for: {t['label']} ({hm})")
+                audio_player_autoplay(d,m,key=f"play_{t['id']}_{hm}",repeat_seconds=t['play_seconds'])
+                t['fired'].append(hm)
 
-# Gentle auto-refresh to keep scheduler active while Running is on
+# Ensure the scheduler runs frequently enough to catch minute boundaries
 if st.session_state.running:
-    st.components.v1.html("""
-    <script>
-      setTimeout(function(){
-        const url = new URL(window.location.href);
-        url.searchParams.set('ts', Date.now());
-        window.location.replace(url.toString());
-      }, 1000);
-    </script>
-    """, height=0)
+    st.components.v1.html(
+        """
+        <script>
+          setTimeout(function(){
+            const url = new URL(window.location.href);
+            url.searchParams.set('ts', Date.now());
+            window.location.replace(url.toString());
+          }, 1000);
+        </script>
+        """,
+        height=0,
+    )
