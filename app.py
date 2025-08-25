@@ -68,32 +68,36 @@ def to_raw_github_url(blob_url:str)->str:
     return blob_url
 
 def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seconds=1):
-    b64 = base64.b64encode(audio_bytes).decode()
-    html = f"""
-    <audio id='{key}' autoplay>
-      <source src='data:{mime};base64,{b64}'>
-    </audio>
-    <script>
-      const a = document.getElementById('{key}');
-      const endTime = Date.now() + {1000 * max(1, repeat_seconds)};
-      function kick() {{
-        if (Date.now() < endTime) {{
-          try {{ a.currentTime = 0; a.play(); }} catch(e) {{}}
-        }} else {{
-          clearInterval(iv);
-          try {{ a.pause(); a.currentTime = 0; }} catch(e) {{}}
-        }}
-      }}
-      // ensure playback on user interaction if blocked
-      a.play().catch(()=>{{
-        const resume = ()=>{{ a.play(); document.removeEventListener('click',resume); }};
-        document.addEventListener('click',resume);
-      }});
-      // repeat every 2s regardless of file length
-      const iv = setInterval(kick, 2000);
-    </script>
+    """Autoplay with reliable repeat: loop the audio and stop after N seconds.
+    Includes a one-time 'Enable sound' button to satisfy browser gesture policies.
     """
-    st.components.v1.html(html, height=0)
+    b64 = base64.b64encode(audio_bytes).decode()
+    dur_ms = 1000 * max(1, repeat_seconds)
+    html = (
+        "<div style='display:flex;align-items:center;gap:.5rem'>"
+        + "<audio id='"+key+"' autoplay loop preload='auto'>"
+        + "<source src='data:"+mime+";base64,"+b64+"'>"
+        + "</audio>"
+        + "<button id='btn_"+key+"' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>"
+        + "</div>"
+        + "<script>"
+        + "(function(){\n"
+          "  const a=document.getElementById('"+key+"');\n"
+          "  const btn=document.getElementById('btn_"+key+"');\n"
+          "  a.muted=false;\n"
+          "  function start(){ try{ a.play().catch(()=>{}); }catch(e){} }\n"
+          "  a.addEventListener('canplay', start, {once:true});\n"
+          "  // Try immediately as well\n"
+          "  start();\n"
+          "  // If autoplay is blocked, a user click will enable it\n"
+          "  ['click','pointerdown','keydown','touchstart'].forEach(ev=>{ document.addEventListener(ev, start, { once:true }); });\n"
+          "  if(btn) btn.addEventListener('click', start, {once:true});\n"
+          "  // Stop after the repeat window\n"
+          "  setTimeout(()=>{ try{ a.loop=false; a.pause(); a.currentTime=0; }catch(e){} }, "+str(dur_ms)+");\n"
+          "})();\n"
+        + "</script>"
+    )
+    st.components.v1.html(html, height=40)
 
 if 'sounds' not in st.session_state:
     lib={}
