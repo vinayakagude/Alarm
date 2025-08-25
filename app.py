@@ -90,9 +90,7 @@ def to_raw_github_url(blob_url: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_seconds=1):
-    """Repeat for N seconds by re‑striking the audio every 2s; then stop.
-    Shows a tiny 'Enable sound' button to satisfy browser gesture policies once.
-    """
+    """Repeat for N seconds by re‑striking the audio every 2s; then stop."""
     b64 = base64.b64encode(audio_bytes).decode()
     dur_ms = 1000 * max(1, int(repeat_seconds))
 
@@ -103,20 +101,22 @@ def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_s
         + "</audio>"
         + "<button id='btn_" + key + "' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>"
         + "</div>"
-        + "<script>"
-        + "(function(){\n"
-          "  var a=document.getElementById('" + key + "');\n"
-          "  var btn=document.getElementById('btn_" + key + "');\n"
-          "  var endTime=Date.now()+" + str(dur_ms) + ";\n"
-          "  var period=2000; // strike every 2s\n"
-          "  function strike(){ try{ a.pause(); a.currentTime=0; a.play().catch(function(){}); }catch(e){} }\n"
-          "  function start(){ strike(); }\n"
-          "  start();\n"
-          "  ['click','pointerdown','keydown','touchstart'].forEach(function(ev){ document.addEventListener(ev, start, { once:true }); });\n"
-          "  if(btn) btn.addEventListener('click', start, { once:true });\n"
-          "  var iv=setInterval(function(){ if(Date.now()<endTime){ strike(); } else { try{ clearInterval(iv); a.pause(); a.currentTime=0; }catch(e){} } }, period);\n"
-          "})();\n"
-        + "</script>"
+        + f"""
+<script>
+(function(){{
+  var a=document.getElementById('{key}');
+  var btn=document.getElementById('btn_{key}');
+  var endTime=Date.now()+{dur_ms};
+  var period=2000; // strike every 2s
+  function strike(){{ try{{ a.pause(); a.currentTime=0; a.play().catch(function(){{}}); }}catch(e){{}} }}
+  function start(){{ strike(); }}
+  start();
+  ['click','pointerdown','keydown','touchstart'].forEach(function(ev){{ document.addEventListener(ev, start, {{ once:true }}); }});
+  if(btn) btn.addEventListener('click', start, {{ once:true }});
+  var iv=setInterval(function(){{ if(Date.now()<endTime){{ strike(); }} else {{ try{{ clearInterval(iv); a.pause(); a.currentTime=0; }}catch(e){{}} }} }}, period);
+}})();
+</script>
+"""
     )
     st.components.v1.html(html, height=60)
 
@@ -278,7 +278,6 @@ for t in st.session_state.timers:
                 st.success(f"Time for: {t['label']} ({hm})")
                 audio_player_autoplay(d, m, key=f"play_{t['id']}_{hm}", repeat_seconds=t['play_seconds'])
                 t['fired'].append(hm)
-                # Avoid refreshing while sound is playing so repeats aren't cut off
                 end_ts = (now + dt.timedelta(seconds=t['play_seconds'])).timestamp()
                 st.session_state.no_refresh_until = max(st.session_state.no_refresh_until, end_ts)
 
@@ -288,13 +287,13 @@ if st.session_state.running:
     remaining_ms = int(max(0.0, st.session_state.no_refresh_until - now_ts) * 1000)
     timeout_ms = remaining_ms + 150 if remaining_ms > 0 else 1000
     st.components.v1.html(
-        """
+        f"""
         <script>
-          setTimeout(function(){
+          setTimeout(function(){{
             const url = new URL(window.location.href);
             url.searchParams.set('ts', Date.now());
             window.location.replace(url.toString());
-          }, """ + str(timeout_ms) + ");
+          }}, {timeout_ms});
         </script>
         """,
         height=0,
