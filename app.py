@@ -38,7 +38,6 @@ def synth_tone(freqs, duration=2.0, decay=2.0):
 
 
 def builtin_sounds_base():
-    # include a synthetic school bell in case remote/ local fetch fails
     school_bell_synth = synth_tone([(880, 0.9), (1760, 0.5), (2637, 0.25)], duration=0.6, decay=6.0)
     return {
         "Soft Bell": (synth_tone([(660, 0.6), (990, 0.4), (1320, 0.2)], duration=2.2, decay=2.0), 'audio/wav'),
@@ -67,10 +66,6 @@ def generate_gongs_and_bowls(n=100, seed=7):
         sounds[f"{name_base} #{i+1}"] = (wav, 'audio/wav')
     return sounds
 
-# ─────────────────────────────────────────────────────────────
-# Remote sound helper (GitHub raw URLs, etc.)
-# ─────────────────────────────────────────────────────────────
-
 @st.cache_data(show_spinner=False, ttl=60*60*24)
 def fetch_remote_bytes(url: str):
     try:
@@ -83,17 +78,11 @@ def fetch_remote_bytes(url: str):
 
 
 def to_raw_github_url(blob_url: str) -> str:
-    # Convert https://github.com/user/repo/blob/branch/path/file -> https://raw.githubusercontent.com/user/repo/branch/path/file
     if 'github.com/' in blob_url and '/blob/' in blob_url:
         return blob_url.replace('github.com/', 'raw.githubusercontent.com/').replace('/blob/', '/')
     return blob_url
 
-# ─────────────────────────────────────────────────────────────
-# Audio player that reliably loops for N seconds
-# ─────────────────────────────────────────────────────────────
-
 def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_seconds=1):
-    """Embed an <audio> element that loops and stops after repeat_seconds."""
     b64 = base64.b64encode(audio_bytes).decode()
     html = f"""
     <audio id='{key}' autoplay loop>
@@ -105,22 +94,15 @@ def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_s
         const resume = () => {{ a.play(); document.removeEventListener('click', resume); }};
         document.addEventListener('click', resume);
       }});
-      setTimeout(() => {{
-        try {{ a.loop = false; a.pause(); a.currentTime = 0; }} catch (e) {{}}
-      }}, {int(1000)} * {int(max(1, repeat_seconds))});
+      setTimeout(() => {{ try {{ a.loop = false; a.pause(); a.currentTime = 0; }} catch (e) {{}} }}, {1000} * {max(1, repeat_seconds)});
     </script>
     """
     st.components.v1.html(html, height=0)
 
-# ─────────────────────────────────────────────────────────────
-# Session state
-# ─────────────────────────────────────────────────────────────
 if 'sounds' not in st.session_state:
     lib = {}
     lib.update(builtin_sounds_base())
     lib.update(generate_gongs_and_bowls(100))
-
-    # Try local file first (if running with mounted data)
     local_bell = '/mnt/data/hailuoto-school-bell-recording-106632.mp3'
     if os.path.exists(local_bell):
         try:
@@ -128,41 +110,30 @@ if 'sounds' not in st.session_state:
                 lib['School Bell'] = (f.read(), 'audio/mpeg')
         except Exception:
             pass
-
-    # Try GitHub URL (provided by user)
     gh_blob_url = 'https://github.com/vinayakagude/Alarm/blob/main/hailuoto-school-bell-recording-106632.mp3'
     raw_url = to_raw_github_url(gh_blob_url)
     content = fetch_remote_bytes(raw_url)
     if content:
         lib['School Bell'] = (content, 'audio/mpeg')
-
-    st.session_state.sounds = lib  # name -> (bytes, mime)
+    st.session_state.sounds = lib
 
 if 'timers' not in st.session_state:
-    # Each timer is a block schedule:
-    # {'id','label','start','end','interval_min','sound','play_seconds','repeat_daily','last_day','fired'}
     st.session_state.timers = []
-
 if 'running' not in st.session_state:
     st.session_state.running = True
 
-# ─────────────────────────────────────────────────────────────
-# UI
-# ─────────────────────────────────────────────────────────────
 st.title('🧘 Meditation Chimes — Day Planner')
 st.caption('US/Eastern time. Create a start–end window, choose the interval, sound, and how long each chime plays.')
 
 with st.sidebar:
     st.header('Preview & Settings')
     st.toggle('Running', value=st.session_state.running, key='running')
-
     preview_name = st.selectbox('Preview a sound', list(st.session_state.sounds.keys()))
     preview_secs = st.slider('Preview length (sec)', 1, 20, 4)
     if st.button('▶️ Preview'):
         snd = st.session_state.sounds[preview_name]
         data, mime = snd if isinstance(snd, tuple) else (snd, 'audio/wav')
         audio_player_autoplay(data, mime, key='preview', repeat_seconds=preview_secs)
-
     st.divider()
     st.subheader('Add remote sound via URL')
     default_url = 'https://github.com/vinayakagude/Alarm/blob/main/hailuoto-school-bell-recording-106632.mp3'
@@ -183,4 +154,27 @@ with st.form('add_block'):
     c1, c2, c3 = st.columns(3)
     start_time = c1.time_input('Start time', dt.time(9, 0))
     end_time = c2.time_input('End time', dt.time(17, 0))
-    interval_min = c3.number_input('Repeat every (min)', 1, 1, 1)  # force continuous every minute
+    interval_min = c3.number_input('Repeat every (min)', 1, 1, 1)
+    c4, c5 = st.columns(2)
+    sound_name = c4.selectbox('Chime sound', list(st.session_state.sounds.keys()))
+    play_seconds = c5.number_input('Each alarm plays (sec)', 1, 300, 5)
+    repeat_daily = st.checkbox('Repeat daily', True)
+    submitted = st.form_submit_button('Add Schedule')
+    if submitted:
+        if end_time <= start_time:
+            st.error('End time must be after start time.')
+        else:
+            new_id = int(time.time() * 1000)
+            st.session_state.timers.append({
+                'id': new_id,
+                'label': label.strip(),
+                'start': start_time.strftime('%H:%M'),
+                'end': end_time.strftime('%H:%M'),
+                'interval_min': int(interval_min),
+                'sound': sound_name,
+                'play_seconds': int(play_seconds),
+                'repeat_daily': bool(repeat_daily),
+                'last_day': None,
+                'fired': [],
+            })
+            st.success(f"Schedule added!")
