@@ -70,16 +70,25 @@ def to_raw_github_url(blob_url:str)->str:
 def audio_player_autoplay(audio_bytes,mime='audio/wav',key='aplayer',repeat_seconds=1):
     b64=base64.b64encode(audio_bytes).decode()
     html=f"""
-    <audio id='{key}' autoplay loop>
+    <audio id='{key}' autoplay>
       <source src='data:{mime};base64,{b64}'>
     </audio>
     <script>
       const a=document.getElementById('{key}');
-      a.play().catch(()=>{{
-        const resume=()=>{{a.play();document.removeEventListener('click',resume);}};
+      const endTime = Date.now() + {1000}*{max(1,repeat_seconds)};
+      const tickMs = 2000; // force a fresh ring every 2s within window
+      function kick(){
+        if(Date.now()<endTime){
+          try{ a.currentTime = 0; a.play().catch(()=>{}); }catch(e){}
+        }
+      }
+      a.play().catch(()=>{
+        const resume=()=>{ a.play(); document.removeEventListener('click',resume); };
         document.addEventListener('click',resume);
-      }});
-      setTimeout(()=>{{try{{a.loop=false;a.pause();a.currentTime=0;}}catch(e){{}}}}, {1000}*{max(1,repeat_seconds)});
+      });
+      const iv=setInterval(kick, tickMs);
+      a.addEventListener('ended', kick);
+      setTimeout(()=>{ try{ clearInterval(iv); a.pause(); a.currentTime=0; }catch(e){} }, {1000}*{max(1,repeat_seconds)});
     </script>
     """
     st.components.v1.html(html,height=0)
