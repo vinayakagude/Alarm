@@ -68,42 +68,22 @@ def to_raw_github_url(blob_url:str)->str:
     return blob_url
 
 def audio_player_autoplay(audio_bytes, mime='audio/wav', key='aplayer', repeat_seconds=1):
-    """Repeat within the window by *re‑striking* the audio every 2s.
-    This guarantees multiple hits even if the file is long.
-    """
+    """Play audio in a loop for repeat_seconds duration."""
     b64 = base64.b64encode(audio_bytes).decode()
     dur_ms = 1000 * max(1, int(repeat_seconds))
-    html = """
-<div style='display:flex;align-items:center;gap:.5rem'>
-  <audio id='""" + key + """' preload='auto'>
-    <source src='data:""" + mime + """;base64,""" + b64 + """'>
-  </audio>
-  <button id='btn_""" + key + """' style='padding:2px 8px;border-radius:6px;font-size:12px'>Enable sound</button>
-</div>
-<script>
-(function(){
-  var a=document.getElementById('""" + key + """');
-  var btn=document.getElementById('btn_""" + key + """');
-  var endTime=Date.now()+""" + str(dur_ms) + """;
-  var period=2000; // strike every 2s
-  function strike(){
-    try{ a.pause(); a.currentTime=0; a.play().catch(function(){}); }catch(e){}
-  }
-  function start(){ strike(); }
-  // start immediately
-  start();
-  // gesture fallbacks
-  ['click','pointerdown','keydown','touchstart'].forEach(function(ev){ document.addEventListener(ev, start, { once:true }); });
-  if(btn) btn.addEventListener('click', start, { once:true });
-  // repeat strikes during window
-  var iv=setInterval(function(){
-    if(Date.now() < endTime){ strike(); }
-    else { try{ clearInterval(iv); a.pause(); a.currentTime=0; }catch(e){} }
-  }, period);
-})();
-</script>
-"""
-    st.components.v1.html(html, height=60)
+    html = f"""
+    <audio id='{key}' autoplay loop>
+      <source src='data:{mime};base64,{b64}'>
+    </audio>
+    <script>
+      const a=document.getElementById('{key}');
+      function start(){{try{{a.play().catch(()=>{{}});}}catch(e){{}}}}
+      start();
+      ['click','pointerdown','keydown','touchstart'].forEach(ev=>{{document.addEventListener(ev,start,{{once:true}});}});
+      setTimeout(()=>{{try{{a.loop=false;a.pause();a.currentTime=0;}}catch(e){{}}}}, {dur_ms});
+    </script>
+    """
+    st.components.v1.html(html, height=40)
 
 if 'sounds' not in st.session_state:
     lib={}
@@ -122,6 +102,7 @@ if 'sounds' not in st.session_state:
 
 if 'timers' not in st.session_state: st.session_state.timers=[]
 if 'running' not in st.session_state: st.session_state.running=True
+if 'no_refresh_until' not in st.session_state: st.session_state.no_refresh_until = 0.0
 
 st.title('🧘 Meditation Chimes — Day Planner')
 st.caption('US/Eastern time. Continuous 1‑minute interval. Clock updates live.')
@@ -235,17 +216,24 @@ for t in st.session_state.timers:
                 st.success(f"Time for: {t['label']} ({hm})")
                 audio_player_autoplay(d,m,key=f"play_{t['id']}_{hm}",repeat_seconds=t['play_seconds'])
                 t['fired'].append(hm)
+                # Suppress page refresh while sound is playing so repeats aren't cut off
+                end_ts = (now + dt.timedelta(seconds=t['play_seconds'])).timestamp()
+                st.session_state.no_refresh_until = max(st.session_state.get('no_refresh_until', 0.0), end_ts)
 
 # Ensure the scheduler runs frequently enough to catch minute boundaries
 if st.session_state.running:
+    now_ts = dt.datetime.now(TZ).timestamp()
+    remaining_ms = int(max(0.0, st.session_state.get('no_refresh_until', 0.0) - now_ts) * 1000)
+    # If a chime is currently playing, delay the refresh until it finishes; otherwise refresh every second
+    timeout_ms = remaining_ms + 200 if remaining_ms > 0 else 1000
     st.components.v1.html(
-        """
+        f"""
         <script>
-          setTimeout(function(){
+          setTimeout(function(){{
             const url = new URL(window.location.href);
             url.searchParams.set('ts', Date.now());
             window.location.replace(url.toString());
-          }, 1000);
+          }}, {timeout_ms});
         </script>
         """,
         height=0,
