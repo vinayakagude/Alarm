@@ -154,4 +154,8 @@ for t in st.session_state.timers:
             if hm not in t['fired']:
                 snd=st.session_state.sounds[t['sound']]
                 data,mime=snd if isinstance(snd,tuple) else (snd,'audio/wav')
-                st.success(f"Tim
+                st.success(f"Time for: {t['label']} {hm}")
+                audio_player_autoplay(data,mime,key=f"p{t['id']}{hm}",repeat_seconds=t['play_seconds'])
+                t['fired'].append(hm)
+if not st.session_state.timers:
+    st.info('No schedules yet')
