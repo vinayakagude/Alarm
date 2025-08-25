@@ -279,7 +279,7 @@ js = f"""
             const log = document.getElementById('alarm-log');
             if (log) {{
               const p = document.createElement('div');
-              p.textContent = `[${curHM}] ${s.label}`;
+              p.textContent = '[' + curHM + '] ' + s.label;
               log.appendChild(p);
             }}
           }}
