@@ -152,8 +152,9 @@ with st.form('add_block'):
     st.subheader('Create a Chime Schedule')
     label = st.text_input('Label', 'Meditation')
     c1, c2, c3 = st.columns(3)
-    start_time = c1.time_input('Start time', dt.time(9, 0))
-    end_time = c2.time_input('End time', dt.time(17, 0))
+    # 1‑minute granularity (fixes 15‑minute default)
+    start_time = c1.time_input('Start time', dt.time(9, 0), step=60)
+    end_time = c2.time_input('End time', dt.time(17, 0), step=60)
     interval_min = c3.number_input('Repeat every (min)', 1, 1, 1)
     c4, c5 = st.columns(2)
     sound_name = c4.selectbox('Chime sound', list(st.session_state.sounds.keys()))
@@ -177,4 +178,34 @@ with st.form('add_block'):
                 'last_day': None,
                 'fired': [],
             })
-            st.success(f"Schedule added!")
+            st.success("Schedule added!")
+
+# List existing schedules
+st.subheader("Today's Schedules")
+remove_ids = []
+for t in st.session_state.timers:
+    st.write(f"**{t['label']}** • {t['start']} → {t['end']} • every {t['interval_min']} min • {t['play_seconds']}s • {t['sound']}")
+    if st.button('✖️ Delete', key=f"del_{t['id']}"):
+        remove_ids.append(t['id'])
+if remove_ids:
+    st.session_state.timers = [x for x in st.session_state.timers if x['id'] not in remove_ids]
+    st.success('Removed schedule(s).')
+
+# Live clock (US/Eastern)
+now = dt.datetime.now(TZ)
+st.metric('Current Time (US/Eastern)', now.strftime('%A, %b %d — %I:%M:%S %p'))
+
+# Scheduler: fire at the top of the minute buckets between start & end
+# We rerun once per second to keep the clock moving and catch minute edges.
+
+today = now.strftime('%Y-%m-%d')
+for t in st.session_state.timers:
+    # reset per day
+    if t['last_day'] != today:
+        t['fired'] = []
+        t['last_day'] = today
+
+    hh_s, mm_s = map(int, t['start'].split(':'))
+    hh_e, mm_e = map(int, t['end'].split(':'))
+    start_dt = now.replace(hour=hh_s, minute=mm_s, second=0, microsecond=0)
+    end_dt = now.replace(hour=hh_e, minute=mm_e, second=59, microsecond=0)
